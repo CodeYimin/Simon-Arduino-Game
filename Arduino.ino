@@ -108,7 +108,7 @@ void loop() {};
 // is released.
 int awaitButtonInput(void (*onPress)(int), void (*onRelease)(int))
 {
-  // If button was already pressed prior to calling this function,
+  // If button was already held down prior to calling this function,
   // wait for them to let go of that button, because this should not
   // count as a full button input.
   if (getButtonPressed() != -1)
@@ -127,7 +127,7 @@ int awaitButtonInput(void (*onPress)(int), void (*onRelease)(int))
   return buttonPressed;
 }
 
-// Lock program flow until a button is pressed
+// Lock program flow until a button is pressed. Which button was pressed is returned.
 int awaitButtonPress()
 {
   while (true)
