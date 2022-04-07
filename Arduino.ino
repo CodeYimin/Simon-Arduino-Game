@@ -84,19 +84,15 @@ void setup()
   
   // Initialize lcd display with 16 columns and 2 rows
   lcd.begin(16, 2);
-  
-  /***************************************
-  * BEGIN GAME CYCLE
-  ***************************************/
-  while (true)
-  {
-    playGame();
-    delay(1000);
-  }
 }
 
-// Loop function is unused but is mandatory to be declared
-void loop() {};
+/***************************************
+* ARDUINO INFINITE LOOP FUNCTION
+***************************************/
+void loop() {
+  playGame();
+  delay(1000);
+};
 
 /***************************************
 * BUTTON INPUT FUNCTIONS
