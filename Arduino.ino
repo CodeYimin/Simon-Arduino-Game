@@ -10,53 +10,49 @@ corresponds to the index of the button pressed.
 Eg. Analog input of 682 means button 2 was pressed */
 const int BUTTON_ANALOG_VALS[NUM_LEDS] = { 512, 682, 767, 818 };
 
+// Delay in ms between each poll for button state
+const int BUTTON_POLLING_INTERVAL = 10;
+
 /***************************************
 * PINS CONSTANTS
 ***************************************/
 const int LED_PINS[NUM_LEDS] = { 2, 3, 4, 5 };
 const int PIEZO_PIN = 6;
 const int BUTTONS_PIN = A0;
+const int FLOATING_ANALOG_PIN = A1;
 
 /***************************************
-* GAME CONSTANTS
+* GAME SETTING CONSTANTS
 ***************************************/
 
 // The default tone played when corresponding button is pressed
 const int TONES[NUM_LEDS] = { 330, 277, 440, 165 };
 
-// The number of LED/Piezo flashes on game event
+// The number of LED/Piezo flashes on corresponding event
 const int GAME_START_FLASHES = 3;
 const int GAME_OVER_FLASHES = 4;
 
+// The tones played during each LED flash of corresponding event
 const int GAME_START_TONES[GAME_START_FLASHES] = { 440, 440, 660 };
 const int GAME_OVER_TONES[GAME_OVER_FLASHES] = { 117, 110, 104, 98 };
 
+// The preset speed difficulties
 const int GAME_SPEEDS[3] = {1, 5, 10};
 
 /***************************************
-* GAME VARIABLES (Constantly updating)
+* GAME VARIABLES
 ***************************************/
 
-bool gameOn = false;
-
-// Speed of sequence played, ranging from 1-10, inclusive
+// Arduino's sequence playing speed during its turn, 
+// ranging from 1-10, inclusive
 int speed = 5;
 
-// Player States
-bool playerSelecting = false;
-bool playerTurn = false;
-bool buttonHeld = false;
-
-// Original sequence
+// Correct sequence that the arduino played
 int* sequence = {};
 int sequenceLen = -1;
 
-// User input attempt
-int userInput = -1;
-int userInputIndex = -1;
-
 /***************************************
-* LED SETUP
+* LCD SETUP
 ***************************************/
 LiquidCrystal lcd(8, 9, 10, 11, 12, 13);
 
@@ -65,18 +61,6 @@ LiquidCrystal lcd(8, 9, 10, 11, 12, 13);
 ***************************************/
 void setup()
 { 
-  /***************************************
-  * MISCELLANEOUS INITIALIZATION
-  ***************************************/
-  // Use random noise from floating analog pin to set as seed
-  randomSeed(analogRead(A1));
-  
-  // Setup serial monitor
-  Serial.begin(9600);
-  
-  // Initialize lcd display with 16 columns and 2 rows
-  lcd.begin(16, 2);
-  
   /***************************************
   * INITIALIZE INPUT & OUTPUT PINS
   ***************************************/
@@ -90,160 +74,171 @@ void setup()
   }
   
   /***************************************
-  * GAME CYCLE
+  * OTHER INITIALIZATION
   ***************************************/
-  startGame();
-}
-
-/***************************************
-* ARDUINO INFINITE LOOP FUNCTION
-***************************************/
-void loop()
-{
-  // Get the index of the button that was pressed.
-  // -1 if no button is pressed.
-  int buttonIndex = getButtonPressed();
+  // Use random noise from floating analog pin to set as seed
+  randomSeed(analogRead(FLOATING_ANALOG_PIN));
+  
+  // Setup serial monitor for development
+  Serial.begin(9600);
+  
+  // Initialize lcd display with 16 columns and 2 rows
+  lcd.begin(16, 2);
   
   /***************************************
-  * Button events
+  * BEGIN GAME CYCLE
   ***************************************/
-  
-  // Button Press Event
-  if (buttonIndex != -1 && !buttonHeld)
+  while (true)
   {
-    buttonHeld = true;
-    onButtonPress(buttonIndex);
+    playGame();
+    delay(1000);
   }
-  
-  // Button Release Event
-  if (buttonIndex == -1)
-  {
-   	if (buttonHeld)
-    {
-      buttonHeld = false;
-      onButtonRelease(); 
-    }
-  }
-  
-  // Reduce the amount of times Arduino is updated per second
-  // by waiting before next update.
-  delay(100);
 }
+
+// Loop function is unused but is mandatory to be declared
+void loop() {};
 
 /***************************************
-* Event handlers
+* BUTTON INPUT FUNCTIONS
 ***************************************/
 
-void onButtonPress(int buttonIndex)
+// Lock program flow, until user presses and releases a button.
+// The button pressed is returned, and callback functions can be passed in
+// which are called when the button is initially pressed and when the button
+// is released.
+int awaitButtonInput(void (*onPress)(int), void (*onRelease)(int))
 {
-  if (playerTurn || playerSelecting)
+  // If button was already pressed prior to calling this function,
+  // wait for them to let go of that button, because this should not
+  // count as a full button input.
+  if (getButtonPressed() != -1)
   {
-    // Light up the LED corresponding to the pressed button
-    turnOnLED(buttonIndex);
+    awaitButtonRelease();
   }
   
-  if (playerSelecting)
-  {
-    // If player selected auto (random) difficulty
-    if (buttonIndex == 3)
-    {
-      speed = random(1, 11);
-    }
-    // Player selected a set difficulty
-    else 
-    {
-      speed = GAME_SPEEDS[buttonIndex];
-    }
-  }
+  // Wait for button press
+  int buttonPressed = awaitButtonPress();
+  onPress(buttonPressed);
+
+  // Wait for button release
+  awaitButtonRelease();
+  onRelease(buttonPressed);
   
-  if (playerTurn)
+  return buttonPressed;
+}
+
+// Lock program flow until a button is pressed
+int awaitButtonPress()
+{
+  while (true)
   {
-    // Save the user's input
-    userInputIndex++; 
-    userInput = buttonIndex;
+    int buttonPressed = getButtonPressed();
+    if (buttonPressed != -1)
+    {
+      return buttonPressed;
+    }
+
+    delay(BUTTON_POLLING_INTERVAL);
   }
 }
 
-void onButtonRelease()
-{ 
-  if (playerTurn || playerSelecting)
+// Lock program flow until no buttons are pressed
+void awaitButtonRelease()
+{
+  while (true)
   {
-    turnOffLEDs();
-  }
+    if (getButtonPressed() == -1)
+    {
+      return;
+    }
+
+    delay(BUTTON_POLLING_INTERVAL);
+  } 
+}
+
+// Determine which button is pressed (-1 if none is being pressed)
+int getButtonPressed()
+{
+  int buttonInput = analogRead(BUTTONS_PIN);
+  int buttonIndex = find(BUTTON_ANALOG_VALS, NUM_LEDS, buttonInput);
   
-  if (playerSelecting)
-  {
-    // Player already selected mode, so he is no longer selecting
-    playerSelecting = false;
-    
-    // Begin the first level
-    delay(1000);
-    beginLevel();
-  }
-  
-  if (playerTurn)
-  {
-    // Handle edge case where user held down button
-    // before their turn, and then released once the turn
-    // started, which should ideally have no effect
-    if (userInput == -1)
-    {
-      return; 
-    }
-    
-    // On game over (user pressed a wrong button)
-    if (userInput != sequence[userInputIndex])
-    {
-      playerTurn = false;
-
-      endGame();
-      delay(1000);
-
-      // Restart the game
-      startGame();
-    }
-    // On level complete
-    else if (userInputIndex + 1 == sequenceLen)
-    {
-      playerTurn = false;
-
-      delay(1000);
-      nextLevel();
-    }
-  }
+  return buttonIndex;
 }
 
 /***************************************
 * GAME CYCLE FUNCTIONS
 ***************************************/
-void startGame()
+
+// Initialize the sequence, allow player to set difficulty level,
+// and finally start the first level.
+void playGame()
 { 
-  // Initialize/reset the sequence variables
-  sequenceLen = 1;
-  sequence = generateSequence(sequenceLen, NUM_LEDS);
-  
   // Alert player that game is starting
   lcd.clear();
   lcd.print("Game starting!!!");
   LEDLightShow(GAME_START_TONES, GAME_START_FLASHES);
   delay(1000);
   
-  // Create difficulty selection menu
+  // Ask player to set difficulty
+  selectDifficulty();
+  
+  // Reset/Initialize the sequence
+  sequence = generateSequence(1, NUM_LEDS);
+  sequenceLen = 1;
+  
+  // Avoid instantly starting right after selecting difficulty
+  delay(1000);
+  
+  // Keep playing levels with increasing sequence lengths until player loses
+  while (true)
+  {
+    bool levelCompleted = playLevel();
+    if (!levelCompleted)
+    {
+      break;
+    }
+    
+    // Extend the sequence by 1 extra random color
+    extendSequence(random(0, NUM_LEDS));
+    
+    // Wait a bit before moving on to next level
+    delay(1000);
+  }
+  
+  // Game over screen
+  endGame();
+}
+
+// Prompt player to select a difficulty and set the game's difficulty
+// according to their input.
+void selectDifficulty()
+{
+  // Alert player of what's going on
   lcd.clear();
   lcd.print("Select a");
   lcd.setCursor(0, 1);
   lcd.print("difficulty");
   delay(2000);
-  
   lcd.clear();
   lcd.print("0=EASY 1=MED");
   lcd.setCursor(0, 1);
   lcd.print("2=HARD 3=AUTO");
-  
-  // Allow player to begin selecting game mode
-  playerSelecting = true;
+
+  // Player Input
+  int buttonPressed = awaitButtonInput(turnOnLED, turnOffLED);
+  if (buttonPressed == 3)
+  {
+    // Auto Difficulty
+    speed = random(1, 11);
+  }
+  else
+  {
+    // Preset Difficulty
+    speed = GAME_SPEEDS[buttonPressed];
+  } 
 }
 
+// Tell user that the game is over and display the correct sequence
 void endGame() 
 {
   // Display to player that the game is over
@@ -260,45 +255,49 @@ void endGame()
   playSequence(1000, 250);
 }
 
-void nextLevel()
+// Arduino plays the sequence, and then user is asked to replicate it.
+// If the user enters a part of the sequence wrong, false is returned.
+// If the user replicates the entire sequence correctly, true is returned.
+bool playLevel()
 {
-  // Add an additional, random, step to the sequence
-  extendSequence(random(0, NUM_LEDS));
-  
-  // Begin the new level with the extra step added
-  beginLevel();
-}
-
-bool beginLevel()
-{
-  // Reset the user input state
-  userInputIndex = -1;
-  userInput = -1;
-  
-  // Display to player that it is the arduino's turn
+  // Tell player that it is the arduino's turn
   lcd.clear();
   lcd.print("Level ");
   lcd.print(sequenceLen);
   lcd.setCursor(0, 1);
   lcd.print("Simon's turn");
   
-  // Arduino's turn to play the sequence
+  // Arduino plays the sequence
   playSequence(1150 - speed * 100, 230 - speed * 20);
   
-  // Display to player that it is their turn to replicate 
-  // the sequence
+  // Tell player that it is their turn
   lcd.setCursor(0, 1);
   lcd.print("YOUR TURN!!!");
   
-  // Begin the player's turn to input sequence
-  playerTurn = true;
+  // Allow player to enter their replication of the sequence.
+  for (int i = 0; i < sequenceLen; i++)
+  {
+    int playerInput = awaitButtonInput(turnOnLED, turnOffLED);
+    
+    // If player's input doesn't match original sequence's
+    if (playerInput != sequence[i])
+    { 
+      return false;
+    }
+  }
+  
+  return true;
 }
+
+/***************************************
+* SEQUENCE FUNCTIONS
+***************************************/
 
 // Light up LEDs and piezo in the sequence described
 // in the sequence array. The sequence array contains the order
 // of which LEDs gets turned on. onTime is the amount of time
 // an LED stays on before it gets turned off. delayTime is the 
-// delay between each flash
+// delay between each flash.
 void playSequence(int onTime, int delayTime)
 {
   for (int i = 0; i < sequenceLen; i++)
@@ -405,25 +404,12 @@ void turnOffLED(int index)
 }
 
 /***************************************
-* MISC FUNCTIONS
-***************************************/
-
-// Determine which button is pressed (-1 if none is being pressed)
-int getButtonPressed()
-{
-  int buttonInput = analogRead(BUTTONS_PIN);
-  int buttonIndex = find(BUTTON_ANALOG_VALS, NUM_LEDS, buttonInput);
-  
-  return buttonIndex;
-}
-
-/***************************************
 * ARRAY UTILITY FUNCTIONS
 ***************************************/
 
 // Used for development
 // Prints an array to the serial monitor in a readable format
-void printArray(int* array, int length)
+void printArray(const int* array, const int length)
 {
   Serial.print("{");
   for (int i = 0; i < length; i++)
@@ -436,7 +422,7 @@ void printArray(int* array, int length)
 
 // Find the index of the first occurence of an element
 // in an array. Returns -1 if element is not found.
-int find(const int* array, const int length, int searchFor) 
+int find(const int* array, const int length, const int searchFor) 
 {
   for (int i = 0; i < length; i++) 
   {
